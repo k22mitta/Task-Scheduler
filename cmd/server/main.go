@@ -1,15 +1,21 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/khushmittal/task-scheduler/internal/api"
 	"github.com/khushmittal/task-scheduler/internal/config"
 	"github.com/khushmittal/task-scheduler/internal/db"
+	"github.com/khushmittal/task-scheduler/internal/scheduler"
+	"github.com/khushmittal/task-scheduler/internal/worker"
 )
 
 func main() {
@@ -25,6 +31,15 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	sched := scheduler.New(database, 5*time.Second)
+	go sched.Start(ctx)
+
+	pool := worker.NewPool(database, 10, sched.Jobs())
+	pool.Start(ctx)
+
 	repo := db.NewJobRepository(database)
 	h := api.NewHandler(repo)
 
@@ -38,9 +53,22 @@ func main() {
 	mux.HandleFunc("GET /jobs/{id}", h.GetJob)
 	mux.HandleFunc("DELETE /jobs/{id}", h.CancelJob)
 
-	addr := fmt.Sprintf(":%s", cfg.Port)
-	log.Printf("server listening on %s", addr)
-	if err := http.ListenAndServe(addr, api.LoggingMiddleware(mux)); err != nil {
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%s", cfg.Port),
+		Handler: api.LoggingMiddleware(mux),
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("server shutdown: %v", err)
+		}
+	}()
+
+	log.Printf("server listening on :%s", cfg.Port)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server: %v", err)
 	}
 }
