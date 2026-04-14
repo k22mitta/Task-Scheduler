@@ -17,15 +17,20 @@ func NewJobRepository(db *sql.DB) *JobRepository {
 	return &JobRepository{db: db}
 }
 
-func (r *JobRepository) Create(ctx context.Context, name string, payload json.RawMessage, scheduledAt time.Time, maxAttempts int) (*Job, error) {
+func (r *JobRepository) Create(ctx context.Context, name string, payload json.RawMessage, scheduledAt time.Time, maxAttempts int, cronExpr string) (*Job, error) {
 	const query = `
-		INSERT INTO jobs (name, payload, status, scheduled_at, max_attempts)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO jobs (name, payload, status, scheduled_at, max_attempts, cron_expression)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, name, payload, status, scheduled_at, started_at, finished_at,
-		          attempts, max_attempts, created_at, updated_at`
+		          attempts, max_attempts, cron_expression, created_at, updated_at`
+
+	var cronArg sql.NullString
+	if cronExpr != "" {
+		cronArg = sql.NullString{String: cronExpr, Valid: true}
+	}
 
 	var job Job
-	err := r.db.QueryRowContext(ctx, query, name, payload, StatusPending, scheduledAt, maxAttempts).Scan(
+	err := r.db.QueryRowContext(ctx, query, name, payload, StatusPending, scheduledAt, maxAttempts, cronArg).Scan(
 		&job.ID,
 		&job.Name,
 		&job.Payload,
@@ -35,6 +40,7 @@ func (r *JobRepository) Create(ctx context.Context, name string, payload json.Ra
 		&job.FinishedAt,
 		&job.Attempts,
 		&job.MaxAttempts,
+		&job.CronExpression,
 		&job.CreatedAt,
 		&job.UpdatedAt,
 	)
@@ -47,7 +53,7 @@ func (r *JobRepository) Create(ctx context.Context, name string, payload json.Ra
 func (r *JobRepository) List(ctx context.Context, limit, offset int) ([]Job, error) {
 	const query = `
 		SELECT id, name, payload, status, scheduled_at, started_at, finished_at,
-		       attempts, max_attempts, created_at, updated_at
+		       attempts, max_attempts, cron_expression, created_at, updated_at
 		FROM jobs
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2`
@@ -71,6 +77,7 @@ func (r *JobRepository) List(ctx context.Context, limit, offset int) ([]Job, err
 			&job.FinishedAt,
 			&job.Attempts,
 			&job.MaxAttempts,
+			&job.CronExpression,
 			&job.CreatedAt,
 			&job.UpdatedAt,
 		); err != nil {
@@ -84,7 +91,7 @@ func (r *JobRepository) List(ctx context.Context, limit, offset int) ([]Job, err
 func (r *JobRepository) GetByID(ctx context.Context, id uuid.UUID) (*Job, error) {
 	const query = `
 		SELECT id, name, payload, status, scheduled_at, started_at, finished_at,
-		       attempts, max_attempts, created_at, updated_at
+		       attempts, max_attempts, cron_expression, created_at, updated_at
 		FROM jobs WHERE id = $1`
 
 	var job Job
@@ -98,6 +105,7 @@ func (r *JobRepository) GetByID(ctx context.Context, id uuid.UUID) (*Job, error)
 		&job.FinishedAt,
 		&job.Attempts,
 		&job.MaxAttempts,
+		&job.CronExpression,
 		&job.CreatedAt,
 		&job.UpdatedAt,
 	)

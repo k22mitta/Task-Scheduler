@@ -23,10 +23,11 @@ func NewHandler(repo *db.JobRepository) *Handler {
 
 func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string          `json:"name"`
-		Payload     json.RawMessage `json:"payload"`
-		ScheduledAt time.Time       `json:"scheduled_at"`
-		MaxAttempts int             `json:"max_attempts"`
+		Name           string          `json:"name"`
+		Payload        json.RawMessage `json:"payload"`
+		ScheduledAt    time.Time       `json:"scheduled_at"`
+		MaxAttempts    int             `json:"max_attempts"`
+		CronExpression string          `json:"cron_expression"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -45,7 +46,7 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		req.MaxAttempts = 3
 	}
 
-	job, err := h.repo.Create(r.Context(), req.Name, req.Payload, req.ScheduledAt, req.MaxAttempts)
+	job, err := h.repo.Create(r.Context(), req.Name, req.Payload, req.ScheduledAt, req.MaxAttempts, req.CronExpression)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "failed to create job")
 		return

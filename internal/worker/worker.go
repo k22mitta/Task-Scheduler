@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/khushmittal/task-scheduler/internal/db"
+	"github.com/khushmittal/task-scheduler/internal/scheduler"
 )
 
 type Worker struct {
 	id   int
 	jobs <-chan db.Job
 	db   *sql.DB
+	repo *db.JobRepository
 }
 
 type Pool struct {
@@ -28,6 +30,7 @@ func NewPool(database *sql.DB, concurrency int, jobs <-chan db.Job) *Pool {
 			id:   i + 1,
 			jobs: jobs,
 			db:   database,
+			repo: db.NewJobRepository(database),
 		}
 	}
 	return &Pool{workers: workers}
@@ -84,6 +87,18 @@ func (w *Worker) runJob(ctx context.Context, job db.Job) error {
 	}
 
 	log.Printf("worker %d: finished job %s (%s)", w.id, job.ID, job.Name)
+
+	if job.CronExpression.Valid {
+		next, err := scheduler.NextRun(job.CronExpression.String, time.Now())
+		if err != nil {
+			log.Printf("worker %d: invalid cron expression for job %s: %v", w.id, job.ID, err)
+			return nil
+		}
+		if _, err := w.repo.Create(ctx, job.Name, job.Payload, next, job.MaxAttempts, job.CronExpression.String); err != nil {
+			log.Printf("worker %d: failed to reschedule job %s: %v", w.id, job.ID, err)
+		}
+	}
+
 	return nil
 }
 

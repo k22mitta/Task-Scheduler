@@ -56,7 +56,7 @@ func (s *Scheduler) poll(ctx context.Context) error {
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, name, payload, status, scheduled_at, started_at, finished_at,
-		          attempts, max_attempts, created_at, updated_at`
+		          attempts, max_attempts, cron_expression, created_at, updated_at`
 
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
@@ -76,6 +76,7 @@ func (s *Scheduler) poll(ctx context.Context) error {
 			&job.FinishedAt,
 			&job.Attempts,
 			&job.MaxAttempts,
+			&job.CronExpression,
 			&job.CreatedAt,
 			&job.UpdatedAt,
 		); err != nil {
