@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/khushmittal/task-scheduler/internal/db"
@@ -21,6 +22,7 @@ type Worker struct {
 type Pool struct {
 	workers []*Worker
 	jobs    chan db.Job
+	wg      sync.WaitGroup
 }
 
 func NewPool(database *sql.DB, concurrency int, jobs <-chan db.Job) *Pool {
@@ -38,8 +40,16 @@ func NewPool(database *sql.DB, concurrency int, jobs <-chan db.Job) *Pool {
 
 func (p *Pool) Start(ctx context.Context) {
 	for _, w := range p.workers {
-		go w.run(ctx)
+		p.wg.Add(1)
+		go func(w *Worker) {
+			defer p.wg.Done()
+			w.run(ctx)
+		}(w)
 	}
+}
+
+func (p *Pool) Wait() {
+	p.wg.Wait()
 }
 
 func (w *Worker) run(ctx context.Context) {

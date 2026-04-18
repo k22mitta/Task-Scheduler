@@ -71,4 +71,7 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server: %v", err)
 	}
+
+	pool.Wait()
+	log.Println("all workers done, shutting down")
 }
