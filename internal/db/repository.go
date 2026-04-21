@@ -24,6 +24,10 @@ func (r *JobRepository) Create(ctx context.Context, name string, payload json.Ra
 		RETURNING id, name, payload, status, scheduled_at, started_at, finished_at,
 		          attempts, max_attempts, cron_expression, created_at, updated_at`
 
+	if len(payload) == 0 {
+		payload = json.RawMessage("{}")
+	}
+
 	var cronArg sql.NullString
 	if cronExpr != "" {
 		cronArg = sql.NullString{String: cronExpr, Valid: true}
@@ -33,7 +37,7 @@ func (r *JobRepository) Create(ctx context.Context, name string, payload json.Ra
 	err := r.db.QueryRowContext(ctx, query, name, payload, StatusPending, scheduledAt, maxAttempts, cronArg).Scan(
 		&job.ID,
 		&job.Name,
-		&job.Payload,
+		(*[]byte)(&job.Payload),
 		&job.Status,
 		&job.ScheduledAt,
 		&job.StartedAt,
@@ -70,7 +74,7 @@ func (r *JobRepository) List(ctx context.Context, limit, offset int) ([]Job, err
 		if err := rows.Scan(
 			&job.ID,
 			&job.Name,
-			&job.Payload,
+			(*[]byte)(&job.Payload),
 			&job.Status,
 			&job.ScheduledAt,
 			&job.StartedAt,
@@ -98,7 +102,7 @@ func (r *JobRepository) GetByID(ctx context.Context, id uuid.UUID) (*Job, error)
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&job.ID,
 		&job.Name,
-		&job.Payload,
+		(*[]byte)(&job.Payload),
 		&job.Status,
 		&job.ScheduledAt,
 		&job.StartedAt,

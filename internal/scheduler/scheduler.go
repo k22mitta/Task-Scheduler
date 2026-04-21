@@ -69,7 +69,7 @@ func (s *Scheduler) poll(ctx context.Context) error {
 		if err := rows.Scan(
 			&job.ID,
 			&job.Name,
-			&job.Payload,
+			(*[]byte)(&job.Payload),
 			&job.Status,
 			&job.ScheduledAt,
 			&job.StartedAt,
