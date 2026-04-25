@@ -18,20 +18,39 @@ Task Scheduler provides a reliable background job system with:
 ## Architecture
 
 ```
-┌─────────────┐     HTTP      ┌──────────────────┐
-│   Clients   │ ──────────▶  │   API Server      │
-└─────────────┘              │  cmd/server/main  │
-                             └────────┬─────────┘
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    ▼                                   ▼
-           ┌──────────────┐                   ┌──────────────┐
-           │  PostgreSQL  │                   │    Redis     │
-           │  (job store) │                   │   (queue)    │
-           └──────────────┘                   └──────────────┘
+HTTP Client
+    │
+    │  POST /jobs, GET /jobs, GET /jobs/:id, DELETE /jobs/:id
+    ▼
+REST API (cmd/server)
+    │
+    │  INSERT / SELECT
+    ▼
+PostgreSQL (jobs table)
+    ▲
+    │  SELECT ... FOR UPDATE SKIP LOCKED
+    │  UPDATE status = 'running'
+Scheduler (polls every 5s)
+    │
+    │  chan db.Job
+    ▼
+Worker Pool (10 goroutines)
+    │
+    │  UPDATE status = 'done' / 'failed'
+    │  INSERT next run (recurring jobs)
+    ▼
+PostgreSQL (jobs table)
 ```
 
-The API server writes jobs to PostgreSQL and enqueues references in Redis. Workers (coming soon) pull from Redis, execute jobs, and write results back to PostgreSQL.
+---
+
+## How It Works
+
+1. A job is submitted via `POST /jobs` and stored in PostgreSQL with status `pending`.
+2. The scheduler polls PostgreSQL every 5 seconds for jobs where `scheduled_at <= now()`.
+3. Due jobs are claimed atomically using `UPDATE ... FOR UPDATE SKIP LOCKED` — no job ever runs twice, even under concurrent schedulers.
+4. A worker goroutine executes the job and marks it `done` or `failed`, recording `finished_at`.
+5. Recurring jobs automatically reschedule themselves by inserting a new row with the next cron fire time calculated from the `cron_expression`.
 
 ---
 
