@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/khushmittal/task-scheduler/internal/db"
+	"github.com/khushmittal/task-scheduler/internal/redisdb"
 
 	gosql "database/sql"
 )
@@ -17,6 +18,10 @@ func TestScheduler_PicksUpDueJob(t *testing.T) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set")
+	}
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		t.Skip("REDIS_URL not set")
 	}
 
 	database, err := gosql.Open("pgx", dsn)
@@ -40,7 +45,12 @@ func TestScheduler_PicksUpDueJob(t *testing.T) {
 		database.Exec("DELETE FROM jobs WHERE id = $1", job.ID)
 	})
 
-	sched := New(database, time.Second)
+	redisClient, err := redisdb.New(redisURL)
+	if err != nil {
+		t.Fatalf("connect redis: %v", err)
+	}
+
+	sched := New(database, redisClient, time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

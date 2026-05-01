@@ -14,6 +14,7 @@ import (
 	"github.com/khushmittal/task-scheduler/internal/api"
 	"github.com/khushmittal/task-scheduler/internal/config"
 	"github.com/khushmittal/task-scheduler/internal/db"
+	"github.com/khushmittal/task-scheduler/internal/redisdb"
 	"github.com/khushmittal/task-scheduler/internal/scheduler"
 	"github.com/khushmittal/task-scheduler/internal/worker"
 )
@@ -31,10 +32,15 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 
+	redisClient, err := redisdb.New(cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("redis: %v", err)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	sched := scheduler.New(database, 5*time.Second)
+	sched := scheduler.New(database, redisClient, 5*time.Second)
 	go sched.Start(ctx)
 
 	pool := worker.NewPool(database, 10, sched.Jobs())

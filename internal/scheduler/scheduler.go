@@ -6,22 +6,29 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/khushmittal/task-scheduler/internal/db"
+	"github.com/khushmittal/task-scheduler/internal/redisdb"
 )
 
 type Scheduler struct {
-	db       *sql.DB
-	jobs     chan db.Job
-	interval time.Duration
-	done     chan struct{}
+	db          *sql.DB
+	redisClient *redis.Client
+	ownerID     string
+	jobs        chan db.Job
+	interval    time.Duration
+	done        chan struct{}
 }
 
-func New(database *sql.DB, interval time.Duration) *Scheduler {
+func New(database *sql.DB, redisClient *redis.Client, interval time.Duration) *Scheduler {
 	return &Scheduler{
-		db:       database,
-		jobs:     make(chan db.Job, 100),
-		interval: interval,
-		done:     make(chan struct{}),
+		db:          database,
+		redisClient: redisClient,
+		ownerID:     uuid.New().String(),
+		jobs:        make(chan db.Job, 100),
+		interval:    interval,
+		done:        make(chan struct{}),
 	}
 }
 
@@ -35,8 +42,21 @@ func (s *Scheduler) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			lock := redisdb.NewLock(s.redisClient, "scheduler:lock", s.ownerID, 10*time.Second)
+			acquired, err := lock.Acquire(ctx)
+			if err != nil {
+				log.Printf("scheduler: lock acquire error: %v", err)
+				continue
+			}
+			if !acquired {
+				log.Println("scheduler: lock held by another instance, skipping")
+				continue
+			}
 			if err := s.poll(ctx); err != nil {
 				log.Printf("scheduler poll error: %v", err)
+			}
+			if err := lock.Release(ctx); err != nil {
+				log.Printf("scheduler: lock release error: %v", err)
 			}
 		}
 	}
