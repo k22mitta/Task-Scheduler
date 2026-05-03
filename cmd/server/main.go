@@ -40,6 +40,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
+	node := redisdb.NewNode(redisClient)
+	if err := node.Register(ctx); err != nil {
+		log.Fatalf("node register: %v", err)
+	}
+	log.Printf("node id: %s", node.ID())
+	go node.Heartbeat(ctx)
+
 	sched := scheduler.New(database, redisClient, 5*time.Second)
 	go sched.Start(ctx)
 
