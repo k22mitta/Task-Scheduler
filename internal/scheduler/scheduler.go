@@ -52,6 +52,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 				log.Println("scheduler: lock held by another instance, skipping")
 				continue
 			}
+			if err := s.recoverOrphanedJobs(ctx); err != nil {
+				log.Printf("scheduler: orphan recovery error: %v", err)
+			}
 			if err := s.poll(ctx); err != nil {
 				log.Printf("scheduler poll error: %v", err)
 			}
@@ -64,6 +67,26 @@ func (s *Scheduler) Start(ctx context.Context) {
 
 func (s *Scheduler) Jobs() <-chan db.Job {
 	return s.jobs
+}
+
+func (s *Scheduler) recoverOrphanedJobs(ctx context.Context) error {
+	const query = `
+		UPDATE jobs
+		SET status = 'pending', started_at = NULL
+		WHERE status = 'running' AND started_at < now() - interval '5 minutes'`
+
+	result, err := s.db.ExecContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		log.Printf("scheduler: recovered %d orphaned jobs", n)
+	}
+	return nil
 }
 
 func (s *Scheduler) poll(ctx context.Context) error {
