@@ -16,16 +16,22 @@ type Scheduler struct {
 	db          *sql.DB
 	redisClient *redis.Client
 	ownerID     string
+	lockKey     string
 	jobs        chan db.Job
 	interval    time.Duration
 	done        chan struct{}
 }
 
 func New(database *sql.DB, redisClient *redis.Client, interval time.Duration) *Scheduler {
+	return NewWithLockKey(database, redisClient, interval, "scheduler:lock")
+}
+
+func NewWithLockKey(database *sql.DB, redisClient *redis.Client, interval time.Duration, lockKey string) *Scheduler {
 	return &Scheduler{
 		db:          database,
 		redisClient: redisClient,
 		ownerID:     uuid.New().String(),
+		lockKey:     lockKey,
 		jobs:        make(chan db.Job, 100),
 		interval:    interval,
 		done:        make(chan struct{}),
@@ -42,7 +48,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			lock := redisdb.NewLock(s.redisClient, "scheduler:lock", s.ownerID, 10*time.Second)
+			lock := redisdb.NewLock(s.redisClient, s.lockKey, s.ownerID, 10*time.Second)
 			acquired, err := lock.Acquire(ctx)
 			if err != nil {
 				log.Printf("scheduler: lock acquire error: %v", err)
@@ -58,7 +64,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 			if err := s.poll(ctx); err != nil {
 				log.Printf("scheduler poll error: %v", err)
 			}
-			if err := lock.Release(ctx); err != nil {
+			if err := lock.Release(context.WithoutCancel(ctx)); err != nil {
 				log.Printf("scheduler: lock release error: %v", err)
 			}
 		}
