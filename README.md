@@ -121,6 +121,18 @@ Returns the health status of the server.
 
 ---
 
+## Distributed Design
+
+**Redis distributed lock.** Before each poll cycle, the scheduler tries to acquire a Redis lock (`scheduler:lock`) using `SET NX EX`. Only one instance can hold the lock at a time — all others see it is taken and skip that cycle. The lock has a 10-second TTL so it is automatically released if the holder crashes mid-poll, and it is explicitly released after each successful poll so the next instance can acquire it immediately on the next tick.
+
+**PostgreSQL `FOR UPDATE SKIP LOCKED`.** The Redis lock serialises which instance runs the poll, but the database provides a second layer of safety. The poll query uses `FOR UPDATE SKIP LOCKED` to lock the rows it selects before updating them. If two poll queries somehow ran concurrently, each would only claim rows the other hadn't already locked — making double-execution impossible at the database level regardless of what happens above it.
+
+**Node heartbeats and dead node detection.** Every instance registers itself in Redis as `node:{uuid} = "alive"` with a 30-second TTL on startup, then refreshes that TTL every 10 seconds via a background heartbeat. If a node crashes or is killed, its heartbeat stops and the key expires naturally within 30 seconds. No explicit deregistration is needed — Redis handles cleanup automatically via TTL expiry.
+
+**Orphaned job recovery.** When a worker claims a job it sets `status = 'running'` and `started_at = now()`. If the worker dies mid-execution the job stays stuck in `running` forever. On every poll cycle the scheduler runs a recovery query that finds jobs where `status = 'running'` and `started_at` is older than 5 minutes, then resets them to `pending` so they are picked up again on the next poll.
+
+---
+
 ## Makefile Reference
 
 | Command          | Description                                   |
