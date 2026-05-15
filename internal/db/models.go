@@ -15,6 +15,7 @@ const (
 	StatusRunning JobStatus = "running"
 	StatusDone    JobStatus = "done"
 	StatusFailed  JobStatus = "failed"
+	StatusDead    JobStatus = "dead"
 )
 
 type NullTime struct {
