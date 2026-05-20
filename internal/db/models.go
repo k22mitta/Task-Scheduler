@@ -40,6 +40,16 @@ func (ns NullString) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ns.String)
 }
 
+type JobRun struct {
+	ID           uuid.UUID  `db:"id"            json:"id"`
+	JobID        uuid.UUID  `db:"job_id"        json:"job_id"`
+	Attempt      int        `db:"attempt"       json:"attempt"`
+	StartedAt    time.Time  `db:"started_at"    json:"started_at"`
+	FinishedAt   NullTime   `db:"finished_at"   json:"finished_at"`
+	Status       JobStatus  `db:"status"        json:"status"`
+	ErrorMessage NullString `db:"error_message" json:"error_message"`
+}
+
 type Job struct {
 	ID             uuid.UUID       `db:"id"             json:"id"`
 	Name           string          `db:"name"           json:"name"`

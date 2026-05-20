@@ -119,6 +119,38 @@ func (r *JobRepository) GetByID(ctx context.Context, id uuid.UUID) (*Job, error)
 	return &job, nil
 }
 
+func (r *JobRepository) ListRunsByJobID(ctx context.Context, jobID uuid.UUID) ([]JobRun, error) {
+	const query = `
+		SELECT id, job_id, attempt, started_at, finished_at, status, error_message
+		FROM job_runs
+		WHERE job_id = $1
+		ORDER BY attempt ASC`
+
+	rows, err := r.db.QueryContext(ctx, query, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	runs := make([]JobRun, 0)
+	for rows.Next() {
+		var run JobRun
+		if err := rows.Scan(
+			&run.ID,
+			&run.JobID,
+			&run.Attempt,
+			&run.StartedAt,
+			&run.FinishedAt,
+			&run.Status,
+			&run.ErrorMessage,
+		); err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
+}
+
 func (r *JobRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = $1`, id)
 	return err

@@ -91,6 +91,22 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, job)
 }
 
+func (h *Handler) GetJobRuns(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
+
+	runs, err := h.repo.ListRunsByJobID(r.Context(), id)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to fetch job runs")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, runs)
+}
+
 func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {

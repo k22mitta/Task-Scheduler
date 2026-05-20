@@ -65,6 +65,7 @@ func main() {
 	mux.HandleFunc("GET /jobs", h.ListJobs)
 	mux.HandleFunc("GET /jobs/{id}", h.GetJob)
 	mux.HandleFunc("DELETE /jobs/{id}", h.CancelJob)
+	mux.HandleFunc("GET /jobs/{id}/runs", h.GetJobRuns)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.Port),
