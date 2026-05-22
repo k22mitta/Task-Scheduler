@@ -151,6 +151,35 @@ func (r *JobRepository) ListRunsByJobID(ctx context.Context, jobID uuid.UUID) ([
 	return runs, rows.Err()
 }
 
+func (r *JobRepository) Retry(ctx context.Context, id uuid.UUID) (*Job, error) {
+	const query = `
+		UPDATE jobs
+		SET status = 'pending', scheduled_at = now(), started_at = NULL
+		WHERE id = $1
+		RETURNING id, name, payload, status, scheduled_at, started_at, finished_at,
+		          attempts, max_attempts, cron_expression, created_at, updated_at`
+
+	var job Job
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&job.ID,
+		&job.Name,
+		(*[]byte)(&job.Payload),
+		&job.Status,
+		&job.ScheduledAt,
+		&job.StartedAt,
+		&job.FinishedAt,
+		&job.Attempts,
+		&job.MaxAttempts,
+		&job.CronExpression,
+		&job.CreatedAt,
+		&job.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
 func (r *JobRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = $1`, id)
 	return err

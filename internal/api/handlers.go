@@ -91,6 +91,37 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, job)
 }
 
+func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
+
+	status, err := h.repo.GetStatus(r.Context(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		h.writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to fetch job")
+		return
+	}
+
+	if status != db.StatusFailed && status != db.StatusDead {
+		h.writeError(w, http.StatusConflict, "only failed or dead jobs can be retried")
+		return
+	}
+
+	job, err := h.repo.Retry(r.Context(), id)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to retry job")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, job)
+}
+
 func (h *Handler) GetJobRuns(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
