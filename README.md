@@ -133,6 +133,18 @@ Returns the health status of the server.
 
 ---
 
+## Retry & Failure Handling
+
+**Exponential backoff.** When a job fails, it is not retried immediately. The next attempt is scheduled at `now() + 30s × 2^attempts`. With the default `max_attempts = 3`, the retry sequence is: first retry after 60 seconds, second retry after 120 seconds, third retry after 240 seconds. This prevents a broken job from hammering a downstream dependency that is already under pressure.
+
+**Dead letter queue.** When a job has exhausted all its attempts (`attempts >= max_attempts`), it is moved to status `dead` instead of being retried again. Dead jobs are never picked up by the scheduler and sit permanently in the table for inspection. This acts as a dead letter queue — failed work is preserved rather than silently discarded, so nothing is lost and operators can diagnose the root cause.
+
+**Audit trail via `job_runs`.** Every time a worker picks up a job, a row is inserted into `job_runs` recording the attempt number, `started_at`, `finished_at`, final status, and any error message. This gives a complete per-job execution history that survives retries, backoff cycles, and manual interventions — useful for debugging intermittent failures and understanding exactly what happened on each attempt.
+
+**Manual retry via the API.** A dead or failed job can be re-queued at any time by calling `POST /jobs/{id}/retry`. This resets the job to `pending` with `scheduled_at = now()` so it is picked up on the next scheduler poll. The attempt count is preserved, so the backoff and dead-detection logic continue counting from where they left off.
+
+---
+
 ## Makefile Reference
 
 | Command          | Description                                   |
