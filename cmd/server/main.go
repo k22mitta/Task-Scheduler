@@ -56,6 +56,9 @@ func main() {
 	repo := db.NewJobRepository(database)
 	h := api.NewHandler(repo)
 
+	hub := api.NewHub()
+	go hub.Run(ctx)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -65,6 +68,7 @@ func main() {
 	mux.HandleFunc("GET /jobs", h.ListJobs)
 	mux.HandleFunc("GET /jobs/{id}", h.GetJob)
 	mux.HandleFunc("DELETE /jobs/{id}", h.CancelJob)
+	mux.HandleFunc("GET /ws", hub.ServeWS)
 	mux.HandleFunc("GET /jobs/{id}/runs", h.GetJobRuns)
 	mux.HandleFunc("POST /jobs/{id}/retry", h.RetryJob)
 
