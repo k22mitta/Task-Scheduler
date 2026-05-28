@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -14,11 +15,16 @@ import (
 	"github.com/khushmittal/task-scheduler/internal/scheduler"
 )
 
+type broadcaster interface {
+	Broadcast([]byte)
+}
+
 type Worker struct {
 	id   int
 	jobs <-chan db.Job
 	db   *sql.DB
 	repo *db.JobRepository
+	hub  broadcaster
 }
 
 type Pool struct {
@@ -27,7 +33,7 @@ type Pool struct {
 	wg      sync.WaitGroup
 }
 
-func NewPool(database *sql.DB, concurrency int, jobs <-chan db.Job) *Pool {
+func NewPool(database *sql.DB, concurrency int, jobs <-chan db.Job, hub broadcaster) *Pool {
 	workers := make([]*Worker, concurrency)
 	for i := range workers {
 		workers[i] = &Worker{
@@ -35,6 +41,7 @@ func NewPool(database *sql.DB, concurrency int, jobs <-chan db.Job) *Pool {
 			jobs: jobs,
 			db:   database,
 			repo: db.NewJobRepository(database),
+			hub:  hub,
 		}
 	}
 	return &Pool{workers: workers}
@@ -52,6 +59,15 @@ func (p *Pool) Start(ctx context.Context) {
 
 func (p *Pool) Wait() {
 	p.wg.Wait()
+}
+
+func (w *Worker) broadcast(v any) {
+	msg, err := json.Marshal(v)
+	if err != nil {
+		log.Printf("worker %d: broadcast marshal error: %v", w.id, err)
+		return
+	}
+	w.hub.Broadcast(msg)
 }
 
 func (w *Worker) run(ctx context.Context) {
@@ -84,6 +100,12 @@ func (w *Worker) runJob(ctx context.Context, job db.Job) (uuid.UUID, error) {
 		return uuid.Nil, fmt.Errorf("increment attempts: %w", err)
 	}
 
+	w.broadcast(map[string]any{
+		"type":   "job.running",
+		"job_id": job.ID,
+		"name":   job.Name,
+	})
+
 	var runID uuid.UUID
 	err = w.db.QueryRowContext(ctx,
 		`INSERT INTO job_runs (job_id, attempt, started_at, status)
@@ -95,6 +117,7 @@ func (w *Worker) runJob(ctx context.Context, job db.Job) (uuid.UUID, error) {
 	}
 
 	log.Printf("worker %d: starting job %s (%s)", w.id, job.ID, job.Name)
+	start := time.Now()
 
 	select {
 	case <-ctx.Done():
@@ -120,6 +143,13 @@ func (w *Worker) runJob(ctx context.Context, job db.Job) (uuid.UUID, error) {
 
 	log.Printf("worker %d: finished job %s (%s)", w.id, job.ID, job.Name)
 
+	w.broadcast(map[string]any{
+		"type":        "job.done",
+		"job_id":      job.ID,
+		"name":        job.Name,
+		"duration_ms": time.Since(start).Milliseconds(),
+	})
+
 	if job.CronExpression.Valid {
 		next, err := scheduler.NextRun(job.CronExpression.String, time.Now())
 		if err != nil {
@@ -136,6 +166,12 @@ func (w *Worker) runJob(ctx context.Context, job db.Job) (uuid.UUID, error) {
 
 func (w *Worker) markFailed(ctx context.Context, job db.Job, runID uuid.UUID, jobErr error) error {
 	safeCtx := context.WithoutCancel(ctx)
+
+	w.broadcast(map[string]any{
+		"type":   "job.failed",
+		"job_id": job.ID,
+		"name":   job.Name,
+	})
 
 	errMsg := jobErr.Error()
 	if runID != uuid.Nil {

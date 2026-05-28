@@ -47,17 +47,17 @@ func main() {
 	log.Printf("node id: %s", node.ID())
 	go node.Heartbeat(ctx)
 
+	hub := api.NewHub()
+	go hub.Run(ctx)
+
 	sched := scheduler.New(database, redisClient, 5*time.Second)
 	go sched.Start(ctx)
 
-	pool := worker.NewPool(database, 10, sched.Jobs())
+	pool := worker.NewPool(database, 10, sched.Jobs(), hub)
 	pool.Start(ctx)
 
 	repo := db.NewJobRepository(database)
 	h := api.NewHandler(repo)
-
-	hub := api.NewHub()
-	go hub.Run(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
