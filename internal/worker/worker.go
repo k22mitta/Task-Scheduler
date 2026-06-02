@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,6 +124,10 @@ func (w *Worker) runJob(ctx context.Context, job db.Job) (uuid.UUID, error) {
 	case <-ctx.Done():
 		return runID, ctx.Err()
 	case <-time.After(2 * time.Second):
+	}
+
+	if strings.Contains(job.Name, "fail") {
+		return runID, fmt.Errorf("simulated failure")
 	}
 
 	_, err = w.db.ExecContext(ctx,
