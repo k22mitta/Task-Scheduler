@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,13 +81,20 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
+	limit := parseQueryInt(r, "limit", 20)
+	offset := parseQueryInt(r, "offset", 0)
+	if limit > 100 {
+		limit = 100
+	}
+
 	const query = `
 		SELECT id, name, payload, status, scheduled_at, started_at, finished_at,
 		       attempts, max_attempts, created_at, updated_at
 		FROM jobs
-		ORDER BY created_at DESC`
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2`
 
-	rows, err := h.db.QueryContext(r.Context(), query)
+	rows, err := h.db.QueryContext(r.Context(), query, limit, offset)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "failed to fetch jobs")
 		return
@@ -189,6 +198,26 @@ func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func LoggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		log.Printf("%s %s %dms", r.Method, r.URL.Path, time.Since(start).Milliseconds())
+	})
+}
+
+func parseQueryInt(r *http.Request, key string, defaultVal int) int {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return defaultVal
+	}
+	return n
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, v any) {

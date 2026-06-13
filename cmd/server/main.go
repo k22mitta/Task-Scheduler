@@ -39,7 +39,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("server listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, api.LoggingMiddleware(mux)); err != nil {
 		log.Fatalf("server: %v", err)
 	}
 }
