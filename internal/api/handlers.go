@@ -14,11 +14,11 @@ import (
 )
 
 type Handler struct {
-	db *sql.DB
+	repo *db.JobRepository
 }
 
-func NewHandler(database *sql.DB) *Handler {
-	return &Handler{db: database}
+func NewHandler(repo *db.JobRepository) *Handler {
+	return &Handler{repo: repo}
 }
 
 func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +33,6 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.Name == "" {
 		h.writeError(w, http.StatusBadRequest, "name is required")
 		return
@@ -46,32 +45,7 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		req.MaxAttempts = 3
 	}
 
-	const query = `
-		INSERT INTO jobs (name, payload, status, scheduled_at, max_attempts)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, name, payload, status, scheduled_at, started_at, finished_at,
-		          attempts, max_attempts, created_at, updated_at`
-
-	var job db.Job
-	err := h.db.QueryRowContext(r.Context(), query,
-		req.Name,
-		req.Payload,
-		db.StatusPending,
-		req.ScheduledAt,
-		req.MaxAttempts,
-	).Scan(
-		&job.ID,
-		&job.Name,
-		&job.Payload,
-		&job.Status,
-		&job.ScheduledAt,
-		&job.StartedAt,
-		&job.FinishedAt,
-		&job.Attempts,
-		&job.MaxAttempts,
-		&job.CreatedAt,
-		&job.UpdatedAt,
-	)
+	job, err := h.repo.Create(r.Context(), req.Name, req.Payload, req.ScheduledAt, req.MaxAttempts)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "failed to create job")
 		return
@@ -87,43 +61,9 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 
-	const query = `
-		SELECT id, name, payload, status, scheduled_at, started_at, finished_at,
-		       attempts, max_attempts, created_at, updated_at
-		FROM jobs
-		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2`
-
-	rows, err := h.db.QueryContext(r.Context(), query, limit, offset)
+	jobs, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "failed to fetch jobs")
-		return
-	}
-	defer rows.Close()
-
-	jobs := make([]db.Job, 0)
-	for rows.Next() {
-		var job db.Job
-		if err := rows.Scan(
-			&job.ID,
-			&job.Name,
-			&job.Payload,
-			&job.Status,
-			&job.ScheduledAt,
-			&job.StartedAt,
-			&job.FinishedAt,
-			&job.Attempts,
-			&job.MaxAttempts,
-			&job.CreatedAt,
-			&job.UpdatedAt,
-		); err != nil {
-			h.writeError(w, http.StatusInternalServerError, "failed to scan job")
-			return
-		}
-		jobs = append(jobs, job)
-	}
-	if err := rows.Err(); err != nil {
-		h.writeError(w, http.StatusInternalServerError, "failed to read jobs")
 		return
 	}
 
@@ -137,25 +77,7 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const query = `
-		SELECT id, name, payload, status, scheduled_at, started_at, finished_at,
-		       attempts, max_attempts, created_at, updated_at
-		FROM jobs WHERE id = $1`
-
-	var job db.Job
-	err = h.db.QueryRowContext(r.Context(), query, id).Scan(
-		&job.ID,
-		&job.Name,
-		&job.Payload,
-		&job.Status,
-		&job.ScheduledAt,
-		&job.StartedAt,
-		&job.FinishedAt,
-		&job.Attempts,
-		&job.MaxAttempts,
-		&job.CreatedAt,
-		&job.UpdatedAt,
-	)
+	job, err := h.repo.GetByID(r.Context(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		h.writeError(w, http.StatusNotFound, "job not found")
 		return
@@ -175,8 +97,7 @@ func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var status db.JobStatus
-	err = h.db.QueryRowContext(r.Context(), `SELECT status FROM jobs WHERE id = $1`, id).Scan(&status)
+	status, err := h.repo.GetStatus(r.Context(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		h.writeError(w, http.StatusNotFound, "job not found")
 		return
@@ -191,8 +112,7 @@ func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `DELETE FROM jobs WHERE id = $1`, id)
-	if err != nil {
+	if err := h.repo.Delete(r.Context(), id); err != nil {
 		h.writeError(w, http.StatusInternalServerError, "failed to cancel job")
 		return
 	}

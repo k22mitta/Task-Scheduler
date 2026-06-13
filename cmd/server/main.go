@@ -25,7 +25,8 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 
-	h := api.NewHandler(database)
+	repo := db.NewJobRepository(database)
+	h := api.NewHandler(repo)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
