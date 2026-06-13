@@ -4,19 +4,120 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"time"
+
+	"github.com/khushmittal/task-scheduler/internal/db"
 )
 
 type Handler struct {
 	db *sql.DB
 }
 
-func NewHandler(db *sql.DB) *Handler {
-	return &Handler{db: db}
+func NewHandler(database *sql.DB) *Handler {
+	return &Handler{db: database}
 }
 
-func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {}
+func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name        string          `json:"name"`
+		Payload     json.RawMessage `json:"payload"`
+		ScheduledAt time.Time       `json:"scheduled_at"`
+		MaxAttempts int             `json:"max_attempts"`
+	}
 
-func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Name == "" {
+		h.writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if req.ScheduledAt.IsZero() {
+		h.writeError(w, http.StatusBadRequest, "scheduled_at is required")
+		return
+	}
+	if req.MaxAttempts == 0 {
+		req.MaxAttempts = 3
+	}
+
+	const query = `
+		INSERT INTO jobs (name, payload, status, scheduled_at, max_attempts)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, name, payload, status, scheduled_at, started_at, finished_at,
+		          attempts, max_attempts, created_at, updated_at`
+
+	var job db.Job
+	err := h.db.QueryRowContext(r.Context(), query,
+		req.Name,
+		req.Payload,
+		db.StatusPending,
+		req.ScheduledAt,
+		req.MaxAttempts,
+	).Scan(
+		&job.ID,
+		&job.Name,
+		&job.Payload,
+		&job.Status,
+		&job.ScheduledAt,
+		&job.StartedAt,
+		&job.FinishedAt,
+		&job.Attempts,
+		&job.MaxAttempts,
+		&job.CreatedAt,
+		&job.UpdatedAt,
+	)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to create job")
+		return
+	}
+
+	h.writeJSON(w, http.StatusCreated, job)
+}
+
+func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
+	const query = `
+		SELECT id, name, payload, status, scheduled_at, started_at, finished_at,
+		       attempts, max_attempts, created_at, updated_at
+		FROM jobs
+		ORDER BY created_at DESC`
+
+	rows, err := h.db.QueryContext(r.Context(), query)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to fetch jobs")
+		return
+	}
+	defer rows.Close()
+
+	jobs := make([]db.Job, 0)
+	for rows.Next() {
+		var job db.Job
+		if err := rows.Scan(
+			&job.ID,
+			&job.Name,
+			&job.Payload,
+			&job.Status,
+			&job.ScheduledAt,
+			&job.StartedAt,
+			&job.FinishedAt,
+			&job.Attempts,
+			&job.MaxAttempts,
+			&job.CreatedAt,
+			&job.UpdatedAt,
+		); err != nil {
+			h.writeError(w, http.StatusInternalServerError, "failed to scan job")
+			return
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to read jobs")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, jobs)
+}
 
 func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {}
 
