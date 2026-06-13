@@ -3,9 +3,11 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/khushmittal/task-scheduler/internal/db"
 )
 
@@ -119,9 +121,75 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, jobs)
 }
 
-func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {}
+func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
 
-func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {}
+	const query = `
+		SELECT id, name, payload, status, scheduled_at, started_at, finished_at,
+		       attempts, max_attempts, created_at, updated_at
+		FROM jobs WHERE id = $1`
+
+	var job db.Job
+	err = h.db.QueryRowContext(r.Context(), query, id).Scan(
+		&job.ID,
+		&job.Name,
+		&job.Payload,
+		&job.Status,
+		&job.ScheduledAt,
+		&job.StartedAt,
+		&job.FinishedAt,
+		&job.Attempts,
+		&job.MaxAttempts,
+		&job.CreatedAt,
+		&job.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		h.writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to fetch job")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, job)
+}
+
+func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
+
+	var status db.JobStatus
+	err = h.db.QueryRowContext(r.Context(), `SELECT status FROM jobs WHERE id = $1`, id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		h.writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to fetch job")
+		return
+	}
+
+	if status != db.StatusPending {
+		h.writeError(w, http.StatusConflict, "only pending jobs can be cancelled")
+		return
+	}
+
+	_, err = h.db.ExecContext(r.Context(), `DELETE FROM jobs WHERE id = $1`, id)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "failed to cancel job")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
